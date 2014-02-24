@@ -16,6 +16,7 @@ A5 SQW
 #include <EthernetUdp.h>
 #include <Wire.h>
 #include <RTClib.h>
+#include <EEPROM.h>
 
 //RTC Encapsulation
 RTC_DS1307 RTC;
@@ -34,6 +35,16 @@ EthernetUDP Udp; //UDP Instance to let us send and recieve packets
 
 unsigned long epoch; //Unix Epoch time (NTP or RTC depending on state)
 
+int eepromaddress = 0;
+
+float temperatureDegF; //Ambient Temperature in degrees F
+int currentTemp; //Current temp in Integer form
+int temperatureSPF; //Temperature set point in Degrees F
+int temperatureDBF; //Temperature dead band in Degrees F
+byte winterTime = false; // Is it winter time
+byte override = false; //override button, will turn on and off heat forcibly
+byte laststate;
+byte currentstate;
 
 void setup() {
   Serial.begin(115200); //Start the serial interface
@@ -60,34 +71,29 @@ void setup() {
     IPAddress myIPAddress = Ethernet.localIP();
     Serial.println(myIPAddress);
     Udp.begin(localPort);
-  //check to see if the RTC is already configured
-  if( !RTC.isrunning() ) {
-    Serial.println("RTC Not Configured");
-    //get the NTP timestamp
+     //get the NTP timestamp
     epoch = getNTP();
-     Serial.println(epoch);
-    //set the RTC
+    Serial.println(epoch);
+    //Set the RTC on startup
     RTC.adjust(epoch);
+  //check to see if the RTC is running, display fault message
+  if( !RTC.isrunning() ) {
     
     //display what we did!
-    Serial.println("RTC Configured:");
+    Serial.println("RTC Fault, check wiring.");
     
-    //show Unix Epoch
+  } else {
+    //Show unix epoch
     Serial.print("Unix Epoch: ");
-    Serial.println(epoch);
-    
+    Serial.println(epoch);    
     //show UTC
     Serial.print("UTC: ");
     showUTC(epoch);
-  } else {
-    Serial.println("RTC Already Configured");
   }
 }
 
 void loop() {
   
-  epoch = getNTP();
-     Serial.println(epoch);
   //repeatedly show the current date and time, taken from the RTC
   DateTime now = RTC.now();
 
@@ -106,8 +112,21 @@ void loop() {
   //Serial.print(":");
   //Serial.println(now.second());
   //RTC.adjust(epoch);
+  pinMode(A4, OUTPUT);
+  if (Winter(override) == true){
+  digitalWrite(A4, TempControl(currentTemp, temperatureSPF, temperatureDBF));
+  currentstate = digitalRead(A4);
+  if (currentstate != laststate){
+    if (laststate == HIGH) {
+     //Put logic in here to datalog a heat off state 
+    }
+    if (laststate == LOW) {
+     //Put logic in here to datalog a heat on state 
+    }
+    laststate = currentstate;
+  }
+  }
   
-  delay(5000);
 }
 
 void showUTC(unsigned long epoch) {
@@ -180,10 +199,49 @@ void sendNTPpacket(IPAddress& address)
   Udp.write(packetBuffer,NTP_PACKET_SIZE);
   Udp.endPacket();
 }
-
 int ESTHour (){
   DateTime now = RTC.now();
   int x = now.hour() - 5;
   return x;
 }
+/* This is the heart of the heating system, There is nothing here to handle cooling, at the time of
+conception heat was the only option available to me, Expect more functionality in the future.
+*/
+byte TempControl(int x, int y, int z){
+ // x is ambient temperature
+// y is setpoint
+// z is dead band
+int dbhi = y + z; //create integer dead band for the heat Ceiling
+int dblo = y - z; //create integer dead band for the heat Floor
+byte enable = false; //build an enable byte
+byte fire = false; //build a turn on byte
+if (x < dbhi){ //allow the enable byte to go high
+ enable = true;
+} else { //once the temperature rises to the high dead band reset everything (turn off heat)
+  enable = false;
+  fire = false;
+}
+if (x < dblo && enable == true){ //we are enabled and we dropped below the dead band
+  fire = true;
+}
+return fire;
+}
+/* The automatic function of winter time can be overridden. On warm winter days a touch of this
+button will disable all heating function and on cold summer days this button will enable the heat
+The override feature will be self resetting most likely with time. 
+*/
+byte Winter(byte override){
+  DateTime now = RTC.now();
+  byte monthenable = false;
+  if (now.month() >= 11 && now.month() <= 5 ) {
+    monthenable = true;
+  } else {
+    monthenable = false;
+  }
+  if (!override && monthenable == true) return true;
+  if (override == true && monthenable == false) return true;
+  else {
+    return false;
+  }
+  
 
