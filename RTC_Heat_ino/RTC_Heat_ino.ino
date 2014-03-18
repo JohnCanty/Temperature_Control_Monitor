@@ -17,6 +17,7 @@ A5 SQW
 #include <Wire.h>
 #include <RTClib.h>
 #include <dht11.h>
+#include <LiquidTWI.h>
 
 
 
@@ -24,6 +25,7 @@ A5 SQW
 RTC_DS1307 RTC;
 dht11 DHT11;
 #define DHT11PIN 2
+LiquidTWI lcd(0);
 byte mac[] = { 0xDE, 0xAD, 0xFE, 0xED, 0xDE, 0xAD };//MAC Address for Ethernet Shield
 unsigned int localPort = 8888; //Local port to listen for UDP Packets
 IPAddress timeServer(192, 168, 10, 2);//NTP Server IP 
@@ -170,16 +172,13 @@ void showUTC(unsigned long epoch) {
 
 unsigned long getNTP() {
   sendNTPpacket(timeServer); // send an NTP packet to a time server
-
   // wait to see if a reply is available
   delay(1000);
   if ( Udp.parsePacket() ) {
     // We've received a packet, read the data from it
     Udp.read(packetBuffer,NTP_PACKET_SIZE); // read the packet into the buffer
-
     //the timestamp starts at byte 40 of the received packet and is four bytes,
     // or two words, long. First, esxtract the two words:
-
     unsigned long highWord = word(packetBuffer[40], packetBuffer[41]);
     unsigned long lowWord = word(packetBuffer[42], packetBuffer[43]);
     // combine the four bytes (two words) into a long integer
