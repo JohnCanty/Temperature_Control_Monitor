@@ -25,6 +25,7 @@ A5 SQW
 RTC_DS1307 RTC;
 dht11 DHT11;
 #define DHT11PIN 2
+#define textBuffSize 9 //length of longest command string plus two spaces for CR + LF
 LiquidTWI lcd(0);
 byte mac[] = { 0xDE, 0xAD, 0xFE, 0xED, 0xDE, 0xAD };//MAC Address for Ethernet Shield
 unsigned int localPort = 8888; //Local port to listen for UDP Packets
@@ -33,8 +34,17 @@ const int NTP_PACKET_SIZE= 48; //NTP Time stamp is in the firth 48 bytes of the 
 byte packetBuffer[ NTP_PACKET_SIZE]; //Buffer to hold incomming and outgoing packets
 EthernetUDP Udp; //UDP Instance to let us send and recieve packets
 unsigned long epoch; //Unix Epoch time (NTP or RTC depending on state)
-int eepromaddress = 0;
-float temperatureDegF; //Ambient Temperature in degrees F
+char textBuff[textBuffSize]; //someplace to put received text
+int charsReceived = 0;
+boolean connectFlag = 0; //we'll use a flag separate from client.connected
+                         //so we can recognize when a new connection has been created
+unsigned long timeOfLastActivity; //time in milliseconds of last activity
+unsigned long allowedConnectTime = 300;//000; //five minutes 300 sec 5 minutes 300K miliseconds 5 minutes
+EthernetServer server(23); // Telnet listens on port 23
+EthernetClient client = 0; // Client needs to have global scope so it can be called
+                   // from functions outside of loop, but we don't know
+                   // what client is yet, so creating an empty object
+//float temperatureDegF; //Ambient Temperature in degrees F
 int currentTemp; //Current temp in Integer form
 int temperatureSPF; //Temperature set point in Degrees F
 int temperatureDBF; //Temperature dead band in Degrees F
@@ -42,12 +52,14 @@ int temperatureDBF; //Temperature dead band in Degrees F
 byte override = false; //override button, will turn on and off heat forcibly
 byte laststate;
 byte currentstate;
+byte DST;
 float humidity;
 float temperature;
 float DegF;
 float kelvin;
 float DewC;
 float DewF;
+
 
 void setup() {
   Serial.begin(115200); //Start the serial interface
@@ -94,7 +106,10 @@ void setup() {
     Serial.print("UTC: ");
     showUTC(epoch);
   }
+  temperatureSPF = 72;
+  temperatureDBF = 2;
 }
+
 
 void loop() {
   int chk = DHT11.read(DHT11PIN); //Fill chk with any error codes from the dht read (library Function)
@@ -117,8 +132,6 @@ void loop() {
   DateTime now = RTC.now();
   DHTRead();
   currentTemp = DegF;
-  temperatureSPF = 77;
-  temperatureDBF = 2;
   Serial.println(now.unixtime());
   Serial.print(" - ");
   Serial.print(currentTemp);
@@ -151,7 +164,21 @@ void loop() {
     laststate = currentstate;
   }
   }
+  // look to see if a new connection is created,
+  // print welcome message, set connected flag
+  if (server.available() && !connectFlag) {
+    connectFlag = 1;
+    client = server.available();
+    client.println("Temperature Server");
+    client.println("? for help");
+    printPrompt();
+  }
   
+  // check to see if text received
+  if (client.connected() && client.available()) getReceivedText();
+    
+  // check to see if connection has timed out
+  if(connectFlag) checkConnectionTimeout();
 }
 
 void showUTC(unsigned long epoch) {
@@ -223,7 +250,9 @@ void sendNTPpacket(IPAddress& address)
 }
 int ESTHour (){
   DateTime now = RTC.now();
-  int x = now.hour() - 5;
+  int x;
+  if (DST == true) x = now.hour() - 4;
+  else x = now.hour() - 5;
   return x;
 }
 /* This is the heart of the heating system, There is nothing here to handle cooling, at the time of
@@ -338,4 +367,175 @@ void DHTRead() {
   Serial.println(DewF , 2);
 return;
 }  
+void printPrompt()
+{
+  timeOfLastActivity = epoch; //millis();
+  client.flush();
+  charsReceived = 0; //count of characters received
+  client.print("\n>");
+}
+
+
+void checkConnectionTimeout()
+{
+  if(epoch - timeOfLastActivity > allowedConnectTime) { //epoch was millis()
+    client.println();
+    client.println("Timeout disconnect.");
+    client.stop();
+    connectFlag = 0;
+  }
+}
+
+
+void getReceivedText()
+{
+  char c;
+  int charsWaiting;
+
+  // copy waiting characters into textBuff
+  //until textBuff full, CR received, or no more characters
+  charsWaiting = client.available();
+  do {
+    c = client.read();
+    textBuff[charsReceived] = c;
+    charsReceived++;
+    charsWaiting--;
+  }
+  while(charsReceived <= textBuffSize && c != 0x0d && charsWaiting > 0);
+  
+  //if CR found go look at received text and execute command
+  if(c == 0x0d) {
+    parseReceivedText();
+    // after completing command, print a new prompt
+    printPrompt();
+  }
+  
+  // if textBuff full without reaching a CR, print an error message
+  if(charsReceived >= textBuffSize) {
+    client.println();
+    printErrorMessage();
+    printPrompt();
+  }
+  // if textBuff not full and no CR, do nothing else;  
+  // go back to loop until more characters are received
+  
+}  
+
+
+void parseReceivedText()
+{
+  // look at first character and decide what to do
+  switch (textBuff[0]) {
+    case 'b' : dbCommand();              break;
+    case 't' : tempCommand();            break;
+    case 'd' : dstCommand();             break;
+    case 's' : estCommand();             break;
+    case 'c' : checkCloseConnection();   break;
+    case '?' : printHelpMessage();       break;
+    case 0x0d :                          break;  //ignore a carriage return
+    default: printErrorMessage();        break;
+  }
+ }
+
+
+void dbCommand()
+  // if we got here, textBuff[0] = 'b'
+{
+  temperatureDBF = setpointAdjust();
+  client.println(temperatureDBF);
+}
+void dstCommand()
+  // if we got here, textBuff[0] = 'd' 
+{
+}  
+void estCommand()
+  // if we got here, textBuff[0] = 's' 
+{
+}  
+void tempCommand()
+  // if we got here, textBuff[0] = 't'
+{
+  temperatureSPF = setpointAdjust();
+  client.println(temperatureSPF);
+}
+
+int setpointAdjust()
+{
+  int tempSetting = 0;
+  int textPosition = 1;  //start at textBuff[1]
+  int digit;
+  do {
+    digit = parseDigit(textBuff[textPosition]); //look for a digit in textBuff
+    if (digit >= 0 && digit <=9) {              //if digit found
+      tempSetting = tempSetting * 10 + digit;     //shift previous result and add new digit
+    }
+    else tempSetting = -1;
+    textPosition++;                             //go to the next position in textBuff
+  }
+  //if not at end of textBuff and not found a CR and not had an error, keep going
+  while(textPosition < 3 && textBuff[textPosition] != 0x0d && tempSetting > -1);
+   //if value is not followed by a CR, return an error
+  if(textBuff[textPosition] != 0x0d) tempSetting = -1;  
+  return tempSetting;
+}
+
+void printErrorMessage()
+{
+  client.println("Unrecognized command.  ? for help.");
+}
+
+
+void checkCloseConnection()
+  // if we got here, textBuff[0] = 'c', check the next two
+  // characters to make sure the command is valid
+{
+  if (textBuff[1] == 'l' && textBuff[2] == 0x0d)
+    closeConnection();
+  else
+    printErrorMessage();
+}
+
+
+void closeConnection()
+{
+  client.println("\nBye.\n");
+  client.stop();
+  connectFlag = 0;
+}
+
+
+void printHelpMessage()
+{
+  DateTime now = RTC.now();
+  client.println("\nExamples of supported commands:\n");
+  client.println("  b       - DeadBand Adjust - Modify the deadband, affects High and Low.");
+  client.println("  d       - DST - Turn on Daylight Savings Time.");
+  client.println("  s       - EST - Turn off Daylight Savings Time.");
+  client.println("  t       - Temp Adjust - Make adjustment to the tepmerature.");
+  client.println("  cl      - Close Connection - End this misery");
+  client.println("  ?       - Hacker Friendly Help print this help message");
+  client.print("Date - ");
+  client.print(now.year()); //put time in here
+  client.print(now.month()); //put time in here
+  client.println(now.day()); //put time in here
+  client.print("Time - ");
+  client.print(ESTHour()); //put time in here
+  client.print(":");
+  client.print(now.minute()); //put time in here
+  client.print(":");
+  client.println(now.second()); //put time in here
+  client.print("Temperature - ");
+  client.println(DegF);
+  client.print("Setpoint - ");
+  client.println(temperatureSPF);
+  client.println("Ok, Go!");
+}
+int parseDigit(char c)
+{
+  int digit = -1;
+  digit = (int) c - 0x30; // subtracting 0x30 from ASCII code gives value
+  if(digit < 0 || digit > 9) digit = -1;
+  return digit;
+}
+
 
