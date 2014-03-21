@@ -276,6 +276,7 @@ if (x < y){ //allow the enable byte to go high
   enableSP = false;
   fire = false;
   fallingEdge = false;
+  risingEdge = false;
 }
 if (x < dblo && lastState == false){ //we dropped below the dead band and are not rising in temp
   fallingEdge = true;
@@ -447,10 +448,12 @@ void dbCommand()
 void dstCommand()
   // if we got here, textBuff[0] = 'd' 
 {
+  DST = true;
 }  
 void estCommand()
   // if we got here, textBuff[0] = 's' 
 {
+  DST = false;
 }  
 void tempCommand()
   // if we got here, textBuff[0] = 't'
