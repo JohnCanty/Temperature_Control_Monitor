@@ -17,7 +17,7 @@ A5 SQW
 #include <Wire.h>
 #include <RTClib.h>
 #include <dht11.h>
-#include <LiquidTWI.h>
+#include <LiquidTWI2.h>
 
 
 
@@ -26,11 +26,14 @@ RTC_DS1307 RTC;
 dht11 DHT11;
 #define DHT11PIN 2
 #define textBuffSize 9 //length of longest command string plus two spaces for CR + LF
-LiquidTWI lcd(0);
+LiquidTWI2 lcd(0x20);
 byte mac[] = { 0xDE, 0xAD, 0xFE, 0xED, 0xDE, 0xAD };//MAC Address for Ethernet Shield
 unsigned int localPort = 8888; //Local port to listen for UDP Packets
 IPAddress timeServer(192, 168, 10, 2);//NTP Server IP 
 const int NTP_PACKET_SIZE= 48; //NTP Time stamp is in the firth 48 bytes of the message
+const byte degreeSymbol = B00101011; //degrees symbol
+const byte upArrow = B01011100; //Temp Rising
+const byte downArrow = B01101100; //Temp Falling
 byte packetBuffer[ NTP_PACKET_SIZE]; //Buffer to hold incomming and outgoing packets
 EthernetUDP Udp; //UDP Instance to let us send and recieve packets
 unsigned long epoch; //Unix Epoch time (NTP or RTC depending on state)
@@ -48,6 +51,7 @@ EthernetClient client = 0; // Client needs to have global scope so it can be cal
 int currentTemp; //Current temp in Integer form
 int temperatureSPF; //Temperature set point in Degrees F
 int temperatureDBF; //Temperature dead band in Degrees F
+int systemStatus; //place to store what is going on
 //byte winterTime = true; // Is it winter time
 byte override = false; //override button, will turn on and off heat forcibly
 byte laststate;
@@ -59,22 +63,27 @@ float DegF;
 float kelvin;
 float DewC;
 float DewF;
+byte staticBlock[8] = {
+  B11111,
+  B11111,
+  B11111,
+  B11111,
+  B11111,
+  B11111,
+  B11111,
+};
 
 
 void setup() {
   Serial.begin(115200); //Start the serial interface
-
   Wire.begin(); //Start Wire
-  
   RTC.begin(); //Start the RTC
-
   pinMode(4, OUTPUT);
   digitalWrite(4,HIGH); //Disable SD Card
   // make sure that the default chip select pin is set to
   // output, even if you don't use it:
   pinMode(10, OUTPUT);
   delay(1000);
-  
   Serial.println("Starting Ethernet"); //configure Ethernet
     if(Ethernet.begin(mac) == 0) {
       Serial.println("Obtaining Address From DHCP Server");
@@ -108,6 +117,10 @@ void setup() {
   }
   temperatureSPF = 72;
   temperatureDBF = 2;
+lcd.setMCPType(LTI_TYPE_MCP23008); // must be called before begin() 
+lcd.begin(20,4); 
+lcd.setBacklight(HIGH); // only supports HIGH or LOW - See more at: http://blog.lincomatic.com/?p=956#sthash.kKKfmouJ.dpuf
+lcd.createChar(0, staticBlock);
 }
 
 
@@ -157,9 +170,11 @@ void loop() {
   if (currentstate != laststate){
     if (laststate == HIGH) {
      //Put logic in here to datalog a heat off state 
+     systemStatus = 2;
     }
     if (laststate == LOW) {
      //Put logic in here to datalog a heat on state 
+     systemStatus = 1;
     }
     laststate = currentstate;
   }
@@ -540,5 +555,158 @@ int parseDigit(char c)
   if(digit < 0 || digit > 9) digit = -1;
   return digit;
 }
-
-
+void lcdDisplayActive (float x, int y){
+  DateTime now = RTC.now();
+  lcd.setCursor(0,0);
+  lcd.print(now.year());
+  lcd.print(now.month());
+  lcd.print(now.day());
+  lcd.setCursor(9,0);
+  if (now.hour() < 10) lcd.print("0");
+  lcd.print(now.hour());
+  lcd.print(":");
+  if (now.minute() < 10) lcd.print("0");
+  lcd.print(now.minute());
+  lcd.setCursor(19,0);
+  if (systemStatus = 1) lcd.write(upArrow);
+  else lcd.print(".");
+  lcd.setCursor(0,1);
+  lcd.print("Actual :");
+  lcd.setCursor(10,1);
+  lcd.print(x); //adds 5 == 15
+  lcd.setCursor(19,1);
+  if (systemStatus = 2) lcd.write(downArrow);
+  else lcd.print(".");
+  lcd.setCursor(0,2);
+  lcd.print("Setpoint :");
+  lcd.setCursor(11,2);
+  lcd.print(y);
+ }
+void lcdDisplayInactive(int x){
+ if (x > 72){
+   lcd.setCursor(10,0);
+   lcd.write(byte(0));
+   lcd.setCursor(11,0);
+   lcd.write(byte(0));
+   lcd.setCursor(9,1);
+   lcd.write(byte(0));
+   lcd.setCursor(10,1);
+   lcd.write(byte(0));
+   lcd.setCursor(11,1);
+   lcd.write(byte(0));
+   lcd.setCursor(12,1);
+   lcd.write(byte(0));
+   lcd.setCursor(8,2);
+   lcd.write(byte(0));
+   lcd.setCursor(9,2);
+   lcd.write(byte(0));
+   lcd.setCursor(10,2);
+   lcd.write(byte(0));
+   lcd.setCursor(11,2);
+   lcd.write(byte(0));
+   lcd.setCursor(12,2);
+   lcd.write(byte(0));
+   lcd.setCursor(13,2);
+   lcd.write(byte(0));
+   lcd.setCursor(7,3);
+   lcd.write(byte(0));
+   lcd.setCursor(8,3);
+   lcd.write(byte(0));
+   lcd.setCursor(9,3);
+   lcd.write(byte(0));
+   lcd.setCursor(10,3);
+   lcd.write(byte(0));
+   lcd.setCursor(11,3);
+   lcd.write(byte(0));
+   lcd.setCursor(12,3);
+   lcd.write(byte(0));
+   lcd.setCursor(13,3);
+   lcd.write(byte(0));
+   lcd.setCursor(14,3);
+   lcd.write(byte(0));
+ } 
+ if (x < 68){
+   lcd.setCursor(10,3);
+   lcd.write(byte(0));
+   lcd.setCursor(11,3);
+   lcd.write(byte(0));
+   lcd.setCursor(9,2);
+   lcd.write(byte(0));
+   lcd.setCursor(10,2);
+   lcd.write(byte(0));
+   lcd.setCursor(11,2);
+   lcd.write(byte(0));
+   lcd.setCursor(12,2);
+   lcd.write(byte(0));
+   lcd.setCursor(8,1);
+   lcd.write(byte(0));
+   lcd.setCursor(9,1);
+   lcd.write(byte(0));
+   lcd.setCursor(10,1);
+   lcd.write(byte(0));
+   lcd.setCursor(11,1);
+   lcd.write(byte(0));
+   lcd.setCursor(12,1);
+   lcd.write(byte(0));
+   lcd.setCursor(13,1);
+   lcd.write(byte(0));
+   lcd.setCursor(7,0);
+   lcd.write(byte(0));
+   lcd.setCursor(8,0);
+   lcd.write(byte(0));
+   lcd.setCursor(9,0);
+   lcd.write(byte(0));
+   lcd.setCursor(10,0);
+   lcd.write(byte(0));
+   lcd.setCursor(11,0);
+   lcd.write(byte(0));
+   lcd.setCursor(12,0);
+   lcd.write(byte(0));
+   lcd.setCursor(13,0);
+   lcd.write(byte(0));
+   lcd.setCursor(14,0);
+   lcd.write(byte(0));
+ } 
+ if (x >= 68 && x <= 72){
+   lcd.setCursor(9,0);
+   lcd.write(byte(0));
+   lcd.setCursor(10,0);
+   lcd.write(byte(0));
+   lcd.setCursor(11,0);
+   lcd.write(byte(0));
+   lcd.setCursor(12,0);
+   lcd.write(byte(0));
+   lcd.setCursor(8,1);
+   lcd.write(byte(0));
+   lcd.setCursor(9,1);
+   lcd.write(byte(0));
+   lcd.setCursor(10,1);
+   lcd.write(byte(0));
+   lcd.setCursor(11,1);
+   lcd.write(byte(0));
+   lcd.setCursor(12,1);
+   lcd.write(byte(0));
+   lcd.setCursor(13,1);
+   lcd.write(byte(0));
+   lcd.setCursor(8,2);
+   lcd.write(byte(0));
+   lcd.setCursor(9,2);
+   lcd.write(byte(0));
+   lcd.setCursor(10,2);
+   lcd.write(byte(0));
+   lcd.setCursor(11,2);
+   lcd.write(byte(0));
+   lcd.setCursor(12,2);
+   lcd.write(byte(0));
+   lcd.setCursor(13,2);
+   lcd.write(byte(0));
+   lcd.setCursor(9,3);
+   lcd.write(byte(0));
+   lcd.setCursor(10,3);
+   lcd.write(byte(0));
+   lcd.setCursor(11,3);
+   lcd.write(byte(0));
+   lcd.setCursor(12,3);
+   lcd.write(byte(0));
+ }
+}
