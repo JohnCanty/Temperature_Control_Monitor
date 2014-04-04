@@ -17,7 +17,7 @@ A5 SQW
 #include <Wire.h>
 #include <RTClib.h>
 #include <dht11.h>
-#include <LiquidTWI2.h>
+#include <LiquidCrystal_I2C.h>
 
 
 
@@ -26,37 +26,38 @@ RTC_DS1307 RTC;
 dht11 DHT11;
 #define DHT11PIN 2
 #define textBuffSize 9 //length of longest command string plus two spaces for CR + LF
-LiquidTWI2 lcd(0x20);
+LiquidCrystal_I2C lcd(0x27,20,4);
 byte mac[] = { 0xDE, 0xAD, 0xFE, 0xED, 0xDE, 0xAD };//MAC Address for Ethernet Shield
 unsigned int localPort = 8888; //Local port to listen for UDP Packets
-IPAddress timeServer(192, 168, 10, 2);//NTP Server IP 
-const int NTP_PACKET_SIZE= 48; //NTP Time stamp is in the firth 48 bytes of the message
-const byte degreeSymbol = B00101011; //degrees symbol
-const byte upArrow = B01011100; //Temp Rising
-const byte downArrow = B01101100; //Temp Falling
-byte packetBuffer[ NTP_PACKET_SIZE]; //Buffer to hold incomming and outgoing packets
-EthernetUDP Udp; //UDP Instance to let us send and recieve packets
-unsigned long epoch; //Unix Epoch time (NTP or RTC depending on state)
-char textBuff[textBuffSize]; //someplace to put received text
-int charsReceived = 0;
-boolean connectFlag = 0; //we'll use a flag separate from client.connected
-                         //so we can recognize when a new connection has been created
 unsigned long timeOfLastActivity; //time in milliseconds of last activity
 unsigned long allowedConnectTime = 300;//000; //five minutes 300 sec 5 minutes 300K miliseconds 5 minutes
+unsigned long epoch; //Unix Epoch time (NTP or RTC depending on state)
+unsigned long Unix; //unix time updated on a cyclic basis
+IPAddress timeServer(192, 168, 10, 2);//NTP Server IP 
+const int NTP_PACKET_SIZE= 48; //NTP Time stamp is in the firth 48 bytes of the message
+int charsReceived = 0;
+int currentTemp; //Current temp in Integer form
+int temperatureSPF; //Temperature set point in Degrees F
+int temperatureDBF; //Temperature dead band in Degrees F
+int systemStatus; //place to store what is going on
+byte override = false; //override button, will turn on and off heat forcibly
+byte laststate;
+byte currentstate;
+byte DST;
+const byte degreeSymbol = B00101011; //degrees symbol
+const byte upArrow = B00101011; //Temp Rising
+const byte downArrow = B00101011; //Temp Falling
+byte packetBuffer[ NTP_PACKET_SIZE]; //Buffer to hold incomming and outgoing packets
+EthernetUDP Udp; //UDP Instance to let us send and recieve packets
+char textBuff[textBuffSize]; //someplace to put received text
+boolean connectFlag = 0; //we'll use a flag separate from client.connected
+                         //so we can recognize when a new connection has been created
 EthernetServer server(23); // Telnet listens on port 23
 EthernetClient client = 0; // Client needs to have global scope so it can be called
                    // from functions outside of loop, but we don't know
                    // what client is yet, so creating an empty object
 //float temperatureDegF; //Ambient Temperature in degrees F
-int currentTemp; //Current temp in Integer form
-int temperatureSPF; //Temperature set point in Degrees F
-int temperatureDBF; //Temperature dead band in Degrees F
-int systemStatus; //place to store what is going on
 //byte winterTime = true; // Is it winter time
-byte override = false; //override button, will turn on and off heat forcibly
-byte laststate;
-byte currentstate;
-byte DST;
 float humidity;
 float temperature;
 float DegF;
@@ -117,10 +118,8 @@ void setup() {
   }
   temperatureSPF = 72;
   temperatureDBF = 2;
-lcd.setMCPType(LTI_TYPE_MCP23008); // must be called before begin() 
-lcd.begin(20,4); 
-lcd.setBacklight(HIGH); // only supports HIGH or LOW - See more at: http://blog.lincomatic.com/?p=956#sthash.kKKfmouJ.dpuf
-lcd.createChar(0, staticBlock);
+lcd.init(); //you know what this does
+lcd.backlight(); //turn the backlight on
 }
 
 
@@ -145,10 +144,11 @@ void loop() {
   DateTime now = RTC.now();
   DHTRead();
   currentTemp = DegF;
-  Serial.println(now.unixtime());
-  Serial.print(" - ");
-  Serial.print(currentTemp);
-  Serial.print(" - ");
+  Unix = now.unixtime();
+  //Serial.println(now.unixtime());
+  //Serial.print(" - ");
+  //Serial.print(currentTemp);
+  //Serial.print(" - ");
   //Serial.print(now.year(), DEC);
   //Serial.print('/');
   //Serial.print(now.month(), DEC);
@@ -164,7 +164,7 @@ void loop() {
   //RTC.adjust(epoch);
   pinMode(A0, OUTPUT);
   if (Winter(override) == true){
-    Serial.println("wintertime");
+    //Serial.println("wintertime");
   digitalWrite(A0, TempControl(currentTemp, temperatureSPF, temperatureDBF));
   currentstate = digitalRead(A0);
   if (currentstate != laststate){
@@ -179,6 +179,8 @@ void loop() {
     laststate = currentstate;
   }
   }
+  //lcd.clear();
+  lcdDisplayActive(DegF,temperatureSPF);
   // look to see if a new connection is created,
   // print welcome message, set connected flag
   if (server.available() && !connectFlag) {
@@ -356,31 +358,31 @@ double dewPointFastF(double celsius, double humidity) {
         return 1.8 * Tf + 32;
 }
 void DHTRead() {
-  Serial.print("Humidity (%): ");
+  //Serial.print("Humidity (%): ");
   humidity = DHT11.humidity;
-  Serial.println(humidity, 2);
+  //Serial.println(humidity, 2);
   
   
-  Serial.print("Temperature (oC): ");
+  //Serial.print("Temperature (oC): ");
   temperature = DHT11.temperature;
-  Serial.println(temperature, 2);
+  //Serial.println(temperature, 2);
   
   
-  Serial.print("Temperature (oF): ");
+  //Serial.print("Temperature (oF): ");
   DegF = (Fahrenheit(DHT11.temperature));
-  Serial.println(DegF, 2);
+  //Serial.println(DegF, 2);
 
-  Serial.print("Temperature (K): ");
+  //Serial.print("Temperature (K): ");
   kelvin = (Kelvin(DHT11.temperature));
-  Serial.println(kelvin , 2);
+  //Serial.println(kelvin , 2);
 
-  Serial.print("Dew Point (oC): ");
+  //Serial.print("Dew Point (oC): ");
   DewC = (dewPointFast(DHT11.temperature, DHT11.humidity));
-  Serial.println(DewC , 2);
+  //Serial.println(DewC , 2);
 
-  Serial.print("Dew Point (oF): ");
+  //Serial.print("Dew Point (oF): ");
   DewF = (dewPointFastF(DHT11.temperature, DHT11.humidity));
-  Serial.println(DewF , 2);
+  //Serial.println(DewF , 2);
 return;
 }  
 void printPrompt()
@@ -557,6 +559,7 @@ int parseDigit(char c)
 }
 void lcdDisplayActive (float x, int y){
   DateTime now = RTC.now();
+  lcd.clear();
   lcd.setCursor(0,0);
   lcd.print(now.year());
   lcd.print(now.month());
@@ -584,9 +587,11 @@ void lcdDisplayActive (float x, int y){
  }
 void lcdDisplayInactive(int x){
  if (x > 72){
+   lcd.setCursor(9,0);
+   lcd.write(byte(0));
    lcd.setCursor(10,0);
    lcd.write(byte(0));
-   lcd.setCursor(11,0);
+   lcd.setCursor(8,1);
    lcd.write(byte(0));
    lcd.setCursor(9,1);
    lcd.write(byte(0));
@@ -594,7 +599,7 @@ void lcdDisplayInactive(int x){
    lcd.write(byte(0));
    lcd.setCursor(11,1);
    lcd.write(byte(0));
-   lcd.setCursor(12,1);
+   lcd.setCursor(7,2);
    lcd.write(byte(0));
    lcd.setCursor(8,2);
    lcd.write(byte(0));
@@ -606,7 +611,7 @@ void lcdDisplayInactive(int x){
    lcd.write(byte(0));
    lcd.setCursor(12,2);
    lcd.write(byte(0));
-   lcd.setCursor(13,2);
+   lcd.setCursor(6,3);
    lcd.write(byte(0));
    lcd.setCursor(7,3);
    lcd.write(byte(0));
@@ -616,13 +621,11 @@ void lcdDisplayInactive(int x){
    lcd.write(byte(0));
    lcd.setCursor(10,3);
    lcd.write(byte(0));
-   lcd.setCursor(11,3);
+   lcd.setCursor(12,3);
    lcd.write(byte(0));
    lcd.setCursor(12,3);
    lcd.write(byte(0));
    lcd.setCursor(13,3);
-   lcd.write(byte(0));
-   lcd.setCursor(14,3);
    lcd.write(byte(0));
  } 
  if (x < 68){
