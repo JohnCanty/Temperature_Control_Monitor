@@ -31,6 +31,9 @@ byte mac[] = { 0xDE, 0xAD, 0xFE, 0xED, 0xDE, 0xAD };//MAC Address for Ethernet S
 unsigned int localPort = 8888; //Local port to listen for UDP Packets
 unsigned long timeOfLastActivity; //time in milliseconds of last activity
 unsigned long allowedConnectTime = 300;//000; //five minutes 300 sec 5 minutes 300K miliseconds 5 minutes
+unsigned long commandTime = 300;
+unsigned long onCommand; //the time that heat was turned on
+unsigned long offCommand; //the time the heat was turned off
 unsigned long epoch; //Unix Epoch time (NTP or RTC depending on state)
 unsigned long Unix; //unix time updated on a cyclic basis
 IPAddress timeServer(192, 168, 10, 2);//NTP Server IP 
@@ -46,7 +49,7 @@ byte currentstate;
 byte DST;
 const byte degreeSymbol = B00101011; //degrees symbol
 const byte upArrow = B00101011; //Temp Rising
-const byte downArrow = B00101011; //Temp Falling
+const byte downArrow = B00101101; //Temp Falling
 byte packetBuffer[ NTP_PACKET_SIZE]; //Buffer to hold incomming and outgoing packets
 EthernetUDP Udp; //UDP Instance to let us send and recieve packets
 char textBuff[textBuffSize]; //someplace to put received text
@@ -165,19 +168,26 @@ void loop() {
   pinMode(A0, OUTPUT);
   if (Winter(override) == true){
     //Serial.println("wintertime");
-  digitalWrite(A0, TempControl(currentTemp, temperatureSPF, temperatureDBF));
-  currentstate = digitalRead(A0);
+   currentstate = TempControl(currentTemp, temperatureSPF, temperatureDBF);
   if (currentstate != laststate){
     if (laststate == HIGH) {
-     //Put logic in here to datalog a heat off state 
-     systemStatus = 2;
+     //Put logic in here to datalog a heat off state
+       offCommand = epoch;
+      if (epoch - onCommand >= commandTime){ 
+      systemStatus = 2;
+      }
     }
     if (laststate == LOW) {
      //Put logic in here to datalog a heat on state 
-     systemStatus = 1;
+     onCommand = epoch;
+     if (epoch - offCommand >= commandTime){ 
+      systemStatus = 1;
+      }
     }
     laststate = currentstate;
   }
+  if (systemStatus == 1) digitalWrite(A0, HIGH);
+  if (systemStatus == 2) digitalWrite(A0, LOW);
   }
   //lcd.clear();
   lcdDisplayActive(DegF,temperatureSPF);
@@ -279,6 +289,7 @@ byte TempControl(int x, int y, int z){
 // x is ambient temperature
 // y is setpoint
 // z is dead band
+if (y < 55 || y > 72) y = 65;
 int dbhi = y + z; //create integer dead band for the heat Ceiling
 int dblo = y - z; //create integer dead band for the heat Floor
 byte enableSP = false; //build an enable byte
@@ -559,26 +570,28 @@ int parseDigit(char c)
 }
 void lcdDisplayActive (float x, int y){
   DateTime now = RTC.now();
-  lcd.clear();
+  //lcd.clear();
   lcd.setCursor(0,0);
   lcd.print(now.year());
+  if (now.month() < 10) lcd.print("0");
   lcd.print(now.month());
+  if (now.day() < 10) lcd.print("0");
   lcd.print(now.day());
   lcd.setCursor(9,0);
   if (now.hour() < 10) lcd.print("0");
-  lcd.print(now.hour());
+  lcd.print(ESTHour());
   lcd.print(":");
   if (now.minute() < 10) lcd.print("0");
   lcd.print(now.minute());
   lcd.setCursor(19,0);
-  if (systemStatus = 1) lcd.write(upArrow);
+  if (systemStatus == 1) lcd.write(upArrow);
   else lcd.print(".");
   lcd.setCursor(0,1);
   lcd.print("Actual :");
   lcd.setCursor(10,1);
   lcd.print(x); //adds 5 == 15
   lcd.setCursor(19,1);
-  if (systemStatus = 2) lcd.write(downArrow);
+  if (systemStatus == 2) lcd.write(downArrow);
   else lcd.print(".");
   lcd.setCursor(0,2);
   lcd.print("Setpoint :");
