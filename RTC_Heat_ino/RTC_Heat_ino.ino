@@ -29,11 +29,10 @@ dht11 DHT11;
 LiquidCrystal_I2C lcd(0x27,20,4);
 byte mac[] = { 0xDE, 0xAD, 0xFE, 0xED, 0xDE, 0xAD };//MAC Address for Ethernet Shield
 unsigned int localPort = 8888; //Local port to listen for UDP Packets
-unsigned long timeOfLastActivity; //time in milliseconds of last activity
+unsigned long timeOfLastActivity; //time in seconds of last activity
 unsigned long allowedConnectTime = 300;//000; //five minutes 300 sec 5 minutes 300K miliseconds 5 minutes
-unsigned long commandTime = 300;
-unsigned long onCommand; //the time that heat was turned on
-unsigned long offCommand; //the time the heat was turned off
+unsigned long commandTime = 300; //5 minutes
+unsigned long changeCommand; //the time that heat command changed
 unsigned long epoch; //Unix Epoch time (NTP or RTC depending on state)
 unsigned long Unix; //unix time updated on a cyclic basis
 IPAddress timeServer(192, 168, 10, 2);//NTP Server IP 
@@ -172,23 +171,20 @@ void loop() {
   if (currentstate != laststate){
     if (laststate == HIGH) {
      //Put logic in here to datalog a heat off state
-       offCommand = epoch;
-      if (epoch - onCommand >= commandTime){ 
-      systemStatus = 2;
-      }
+      systemStatus = 2;    
     }
     if (laststate == LOW) {
      //Put logic in here to datalog a heat on state 
-     onCommand = epoch;
-     if (epoch - offCommand >= commandTime){ 
-      systemStatus = 1;
-      }
+     systemStatus = 1;
     }
     laststate = currentstate;
+    changeCommand = epoch;
   }
-  if (systemStatus == 1) digitalWrite(A0, HIGH);
-  if (systemStatus == 2) digitalWrite(A0, LOW);
+  if (epoch - changeCommand >= commandTime){
+    if (systemStatus == 2) digitalWrite(A0, LOW);
+    if (systemStatus == 1) digitalWrite(A0, HIGH);
   }
+}
   //lcd.clear();
   lcdDisplayActive(DegF,temperatureSPF);
   // look to see if a new connection is created,
@@ -459,6 +455,7 @@ void parseReceivedText()
     case 't' : tempCommand();            break;
     case 'd' : dstCommand();             break;
     case 's' : estCommand();             break;
+    case 'o' : nwCommand();              break;
     case 'c' : checkCloseConnection();   break;
     case '?' : printHelpMessage();       break;
     case 0x0d :                          break;  //ignore a carriage return
@@ -483,6 +480,12 @@ void estCommand()
 {
   DST = false;
 }  
+void nwCommand()
+ // if we got here, textBuf[0] = 'o'
+ {
+   if (override == false) override = true;
+   if (override == true) override = false;
+ }
 void tempCommand()
   // if we got here, textBuff[0] = 't'
 {
@@ -542,6 +545,7 @@ void printHelpMessage()
   client.println("  b       - DeadBand Adjust - Modify the deadband, affects High and Low.");
   client.println("  d       - DST - Turn on Daylight Savings Time.");
   client.println("  s       - EST - Turn off Daylight Savings Time.");
+  client.println("  o       - Override - Modify the override command this should only be done in case of nuclear winter.");
   client.println("  t       - Temp Adjust - Make adjustment to the tepmerature.");
   client.println("  cl      - Close Connection - End this misery");
   client.println("  ?       - Hacker Friendly Help print this help message");
@@ -559,6 +563,8 @@ void printHelpMessage()
   client.println(DegF);
   client.print("Setpoint - ");
   client.println(temperatureSPF);
+  if (override == true) client.println("Nuclear Winter has come");
+  else client.println("System Normal");
   client.println("Ok, Go!");
 }
 int parseDigit(char c)
