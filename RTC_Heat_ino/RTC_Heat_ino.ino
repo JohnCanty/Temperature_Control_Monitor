@@ -46,7 +46,6 @@ byte override = false; //override button, will turn on and off heat forcibly
 byte laststate;
 byte currentstate;
 byte DST;
-const byte degreeSymbol = B00101011; //degrees symbol
 const byte upArrow = B00101011; //Temp Rising
 const byte downArrow = B00101101; //Temp Falling
 byte packetBuffer[ NTP_PACKET_SIZE]; //Buffer to hold incomming and outgoing packets
@@ -67,11 +66,11 @@ float kelvin;
 float DewC;
 float DewF;
 byte staticBlock[8] = {
-  B11111,
-  B11111,
-  B11111,
-  B11111,
-  B11111,
+  B10001,
+  B01010,
+  B00100,
+  B01010,
+  B10001,
   B11111,
   B11111,
 };
@@ -186,7 +185,7 @@ void loop() {
   }
 }
   //lcd.clear();
-  lcdDisplayActive(DegF,temperatureSPF);
+  lcdDisplayActive(DegF,temperatureSPF, humidity);
   // look to see if a new connection is created,
   // print welcome message, set connected flag
   if (server.available() && !connectFlag) {
@@ -574,7 +573,7 @@ int parseDigit(char c)
   if(digit < 0 || digit > 9) digit = -1;
   return digit;
 }
-void lcdDisplayActive (float x, int y){
+void lcdDisplayActive (float x, int y, float z){
   DateTime now = RTC.now();
   //lcd.clear();
   lcd.setCursor(0,0);
@@ -603,6 +602,10 @@ void lcdDisplayActive (float x, int y){
   lcd.print("Setpoint :");
   lcd.setCursor(11,2);
   lcd.print(y);
+  lcd.setCursor(0,3);
+  lcd.print("Humidity :");
+  lcd.setCursor(12,3);
+  lcd.print(z);
  }
 void lcdDisplayInactive(int x){
  if (x > 72){
