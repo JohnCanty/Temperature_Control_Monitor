@@ -46,6 +46,8 @@ byte override = false; //override button, will turn on and off heat forcibly
 byte laststate;
 byte currentstate;
 byte DST;
+byte checkRTC;
+byte rtcChecked;
 const byte upArrow = B00101011; //Temp Rising
 const byte downArrow = B00101101; //Temp Falling
 byte packetBuffer[ NTP_PACKET_SIZE]; //Buffer to hold incomming and outgoing packets
@@ -97,26 +99,7 @@ void setup() {
     IPAddress myIPAddress = Ethernet.localIP();
     Serial.println(myIPAddress);
     Udp.begin(localPort);
-     //get the NTP timestamp
-    epoch = getNTP();
-    Serial.println(epoch);
-    //Set the RTC on startup
-    RTC.adjust(epoch);
-    Serial.println("RTC Adjusted");
-  //check to see if the RTC is running, display fault message
-  if( !RTC.isrunning() ) {
-    
-    //display what we did!
-    Serial.println("RTC Fault, check wiring.");
-    
-  } else {
-    //Show unix epoch
-    Serial.print("Unix Epoch: ");
-    Serial.println(epoch);    
-    //show UTC
-    Serial.print("UTC: ");
-    showUTC(epoch);
-  }
+    setRTC();
   temperatureSPF = 72;
   temperatureDBF = 2;
 lcd.init(); //you know what this does
@@ -146,26 +129,8 @@ void loop() {
   DHTRead();
   currentTemp = DegF;
   Unix = now.unixtime();
-  //Serial.println(now.unixtime());
-  //Serial.print(" - ");
-  //Serial.print(currentTemp);
-  //Serial.print(" - ");
-  //Serial.print(now.year(), DEC);
-  //Serial.print('/');
-  //Serial.print(now.month(), DEC);
-  //Serial.print('/');
-  //Serial.print(now.day(), DEC);
-  //Serial.print(" - ");
-  //showUTC(now.unixtime());
-  //Serial.print(ESTHour());
-  //Serial.print(":");
-  //Serial.print(now.minute());
-  //Serial.print(":");
-  //Serial.println(now.second());
-  //RTC.adjust(epoch);
   pinMode(A0, OUTPUT);
   if (Winter(override) == true){
-    //Serial.println("wintertime");
    currentstate = TempControl(currentTemp, temperatureSPF, temperatureDBF);
   if (currentstate != laststate){
     if (laststate == HIGH) {
@@ -184,7 +149,6 @@ void loop() {
     if (systemStatus == 1) digitalWrite(A0, HIGH);
   }
 }
-  //lcd.clear();
   lcdDisplayActive(DegF,temperatureSPF, humidity);
   // look to see if a new connection is created,
   // print welcome message, set connected flag
@@ -201,6 +165,15 @@ void loop() {
     
   // check to see if connection has timed out
   if(connectFlag) checkConnectionTimeout();
+  if (now.hour == 0 && now.minute == 0) checkRTC = true;
+  else {
+    checkRTC = false;
+    rtcChecked = false;
+  }
+  if (checkRTC == true && rtcChecked == false){
+   setRTC();
+   rtcChecked = true;
+  }
 }
 
 void showUTC(unsigned long epoch) {
@@ -734,4 +707,26 @@ void lcdDisplayInactive(int x){
    lcd.setCursor(12,3);
    lcd.write(byte(0));
  }
+}
+void setRTC(){
+  //get the NTP timestamp
+    epoch = getNTP();
+    Serial.println(epoch);
+    //Set the RTC on startup
+    RTC.adjust(epoch);
+    Serial.println("RTC Adjusted");
+  //check to see if the RTC is running, display fault message
+  if( !RTC.isrunning() ) {
+    
+    //display what we did!
+    Serial.println("RTC Fault, check wiring.");
+    
+  } else {
+    //Show unix epoch
+    Serial.print("Unix Epoch: ");
+    Serial.println(epoch);    
+    //show UTC
+    Serial.print("UTC: ");
+    showUTC(epoch);
+  }
 }
