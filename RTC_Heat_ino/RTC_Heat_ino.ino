@@ -80,146 +80,6 @@ byte staticBlock[8] = {
   B11111,
 };
 
-
-void setup() {
-  Serial.begin(115200); //Start the serial interface
-  Wire.begin(); //Start Wire
-  RTC.begin(); //Start the RTC
-  pinMode(4, OUTPUT);
-  digitalWrite(4,HIGH); //Disable SD Card
-  // make sure that the default chip select pin is set to
-  // output, even if you don't use it:
-  pinMode(10, OUTPUT);
-  pinMode(13, OUTPUT);
-  pinMode(5, INPUT); //PIR Pin
-  digitalWrite(5, LOW); // Pull down 
-  delay(1000);
-  Serial.println("Starting Ethernet"); //configure Ethernet
-    if(Ethernet.begin(mac) == 0) {
-      Serial.println("Obtaining Address From DHCP Server");
-      while(true); //keep in loop if needed
-            }
-    Serial.println("Ethernet Configured");
-    delay(1000);
-    Serial.println("The IP Address of this Microcontroller is: ");
-    IPAddress myIPAddress = Ethernet.localIP();
-    Serial.println(myIPAddress);
-    Udp.begin(localPort);
-      //get the NTP timestamp
-    epoch = getNTP();
-    Serial.println(epoch);
-    //Set the RTC on startup
-    RTC.adjust(epoch);
-    Serial.println("RTC Adjusted");
-  //check to see if the RTC is running, display fault message
-     if( !RTC.isrunning() ) {
-    
-    //display what we did!
-    Serial.println("RTC Fault, check wiring.");
-    
-  } else {
-    //Show unix epoch
-    Serial.print("Unix Epoch: ");
-    Serial.println(epoch);    
-    //show UTC
-    Serial.print("UTC: ");
-    showUTC(epoch);
-  }
-  temperatureSPF = 72;
-  temperatureDBF = 2;
-lcd.init(); //you know what this does
-lcd.backlight(); //turn the backlight on
-}
-
-
-void loop() {
-  int chk = DHT11.read(DHT11PIN); //Fill chk with any error codes from the dht read (library Function)
-  delay(500);  
-  switch (chk) { //Do some things like print to the serial monitor if there is an error.
-    case DHTLIB_OK: // Atta Boy!
-                break;
-    case DHTLIB_ERROR_CHECKSUM:
-                Serial.println("Checksum error"); //The checksum is bad, let the user know
-                break;
-    case DHTLIB_ERROR_TIMEOUT:
-                Serial.println("Time out error"); //Is this thing connected?
-                break;
-    default:
-                Serial.println("Unknown error"); //Yeah something broke, don't ask me what it was though
-                break;
-    }
-    
-  //repeatedly show the current date and time, taken from the RTC
-  DateTime now = RTC.now();
-  DHTRead();
-  currentTemp = DegF;
-  pinMode(A0, OUTPUT);
-  if (Winter(override) == true){
-   currentstate = TempControl(currentTemp, temperatureSPF, temperatureDBF);
-  if (currentstate != laststate){
-    if (laststate == HIGH) {
-     //Put logic in here to datalog a heat off state
-      systemStatus = 2;    
-    }
-    if (laststate == LOW) {
-     //Put logic in here to datalog a heat on state 
-     systemStatus = 1;
-    }
-    laststate = currentstate;
-    changeCommand = epoch;
-  }
-  if (epoch - changeCommand >= commandTime){
-    if (systemStatus == 2) digitalWrite(A0, LOW);
-    if (systemStatus == 1) digitalWrite(A0, HIGH);
-  }
-}
-  lcdDisplayActive(DegF,temperatureSPF, humidity);
-  // look to see if a new connection is created,
-  // print welcome message, set connected flag
-  if (server.available() && !connectFlag) {
-    connectFlag = 1;
-    client = server.available();
-    client.println("Temperature Server");
-    client.println("? for help");
-    printPrompt();
-  }
-  
-  // check to see if text received
-  if (client.connected() && client.available()) getReceivedText();
-    
-  // check to see if connection has timed out
-  if(connectFlag) checkConnectionTimeout();
-  if (now.hour() == 0 && now.minute() == 0) checkRTC = true;
-  else {
-    checkRTC = false;
-    rtcChecked = false;
-  }
-  if (checkRTC == true && rtcChecked == false){
-   epoch = getNTP();
-   RTC.adjust(epoch);
-   rtcChecked = true;
-  }
-  pirAcquire = digitalRead(5);
-  if (pirAcquire == HIGH) Serial.println("pir");
-  //Pir toggle inhibit
-  if (pirAcquire != pirLastState){
-    if (pirLastState == HIGH) {
-     //Put logic in here to datalog a heat off state
-      pirStatus = 2;    
-    }
-    if (pirLastState == LOW) {
-     //Put logic in here to datalog a heat on state 
-     pirStatus = 1;
-    }
-    pirLastState = pirAcquire;
-    pirLastTime = epoch;
-  }
-  if (epoch - pirLastTime >= commandTime){
-    if (pirStatus == 2) digitalWrite(13, LOW);
-    if (pirStatus == 1) digitalWrite(13, HIGH);
-  }
-}
-
 void showUTC(unsigned long epoch) {
   Serial.print((epoch % 86400L) / 3600); // print the hour (86400 equals secs per day)
   Serial.print(':');
@@ -742,5 +602,146 @@ void lcdDisplayInactive(int x){
    lcd.setCursor(12,3);
    lcd.write(byte(0));
  }
+}
+
+
+
+void setup() {
+  Serial.begin(115200); //Start the serial interface
+  Wire.begin(); //Start Wire
+  RTC.begin(); //Start the RTC
+  pinMode(4, OUTPUT);
+  digitalWrite(4,HIGH); //Disable SD Card
+  // make sure that the default chip select pin is set to
+  // output, even if you don't use it:
+  pinMode(10, OUTPUT);
+  pinMode(13, OUTPUT);
+  pinMode(5, INPUT); //PIR Pin
+  digitalWrite(5, LOW); // Pull down 
+  delay(1000);
+  Serial.println("Starting Ethernet"); //configure Ethernet
+    if(Ethernet.begin(mac) == 0) {
+      Serial.println("Obtaining Address From DHCP Server");
+      while(true); //keep in loop if needed
+            }
+    Serial.println("Ethernet Configured");
+    delay(1000);
+    Serial.println("The IP Address of this Microcontroller is: ");
+    IPAddress myIPAddress = Ethernet.localIP();
+    Serial.println(myIPAddress);
+    Udp.begin(localPort);
+      //get the NTP timestamp
+    epoch = getNTP();
+    Serial.println(epoch);
+    //Set the RTC on startup
+    RTC.adjust(epoch);
+    Serial.println("RTC Adjusted");
+  //check to see if the RTC is running, display fault message
+     if( !RTC.isrunning() ) {
+    
+    //display what we did!
+    Serial.println("RTC Fault, check wiring.");
+    
+  } else {
+    //Show unix epoch
+    Serial.print("Unix Epoch: ");
+    Serial.println(epoch);    
+    //show UTC
+    Serial.print("UTC: ");
+    showUTC(epoch);
+  }
+  temperatureSPF = 72;
+  temperatureDBF = 2;
+lcd.init(); //you know what this does
+lcd.backlight(); //turn the backlight on
+}
+
+
+void loop() {
+  int chk = DHT11.read(DHT11PIN); //Fill chk with any error codes from the dht read (library Function)
+  delay(500);  
+  switch (chk) { //Do some things like print to the serial monitor if there is an error.
+    case DHTLIB_OK: // Atta Boy!
+                break;
+    case DHTLIB_ERROR_CHECKSUM:
+                Serial.println("Checksum error"); //The checksum is bad, let the user know
+                break;
+    case DHTLIB_ERROR_TIMEOUT:
+                Serial.println("Time out error"); //Is this thing connected?
+                break;
+    default:
+                Serial.println("Unknown error"); //Yeah something broke, don't ask me what it was though
+                break;
+    }
+    
+  //repeatedly show the current date and time, taken from the RTC
+  DateTime now = RTC.now();
+  DHTRead();
+  currentTemp = DegF;
+  pinMode(A0, OUTPUT);
+  if (Winter(override) == true){
+   currentstate = TempControl(currentTemp, temperatureSPF, temperatureDBF);
+  if (currentstate != laststate){
+    if (laststate == HIGH) {
+     //Put logic in here to datalog a heat off state
+      systemStatus = 2;    
+    }
+    if (laststate == LOW) {
+     //Put logic in here to datalog a heat on state 
+     systemStatus = 1;
+    }
+    laststate = currentstate;
+    changeCommand = epoch;
+  }
+  if (epoch - changeCommand >= commandTime){
+    if (systemStatus == 2) digitalWrite(A0, LOW);
+    if (systemStatus == 1) digitalWrite(A0, HIGH);
+  }
+}
+  lcdDisplayActive(DegF,temperatureSPF, humidity);
+  // look to see if a new connection is created,
+  // print welcome message, set connected flag
+  if (server.available() && !connectFlag) {
+    connectFlag = 1;
+    client = server.available();
+    client.println("Temperature Server");
+    client.println("? for help");
+    printPrompt();
+  }
+  
+  // check to see if text received
+  if (client.connected() && client.available()) getReceivedText();
+    
+  // check to see if connection has timed out
+  if(connectFlag) checkConnectionTimeout();
+  if (now.hour() == 0 && now.minute() == 0) checkRTC = true;
+  else {
+    checkRTC = false;
+    rtcChecked = false;
+  }
+  if (checkRTC == true && rtcChecked == false){
+   epoch = getNTP();
+   RTC.adjust(epoch);
+   rtcChecked = true;
+  }
+  pirAcquire = digitalRead(5);
+  if (pirAcquire == HIGH) Serial.println("pir");
+  //Pir toggle inhibit
+  if (pirAcquire != pirLastState){
+    if (pirLastState == HIGH) {
+     //Put logic in here to datalog a heat off state
+      pirStatus = 2;    
+    }
+    if (pirLastState == LOW) {
+     //Put logic in here to datalog a heat on state 
+     pirStatus = 1;
+    }
+    pirLastState = pirAcquire;
+    pirLastTime = epoch;
+  }
+  if (epoch - pirLastTime >= commandTime){
+    if (pirStatus == 2) digitalWrite(13, LOW);
+    if (pirStatus == 1) digitalWrite(13, HIGH);
+  }
 }
 
