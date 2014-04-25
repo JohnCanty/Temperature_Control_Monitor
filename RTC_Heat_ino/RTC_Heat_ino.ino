@@ -34,7 +34,7 @@ unsigned long allowedConnectTime = 300;//000; //five minutes 300 sec 5 minutes 3
 unsigned long commandTime = 300; //5 minutes
 unsigned long changeCommand; //the time that heat command changed
 unsigned long epoch; //Unix Epoch time (NTP or RTC depending on state)
-unsigned long Unix; //unix time updated on a cyclic basis
+unsigned long pirLastTime;
 IPAddress timeServer(192, 168, 10, 2);//NTP Server IP 
 const int NTP_PACKET_SIZE= 48; //NTP Time stamp is in the firth 48 bytes of the message
 int charsReceived = 0;
@@ -42,12 +42,15 @@ int currentTemp; //Current temp in Integer form
 int temperatureSPF; //Temperature set point in Degrees F
 int temperatureDBF; //Temperature dead band in Degrees F
 int systemStatus; //place to store what is going on
-byte override = false; //override button, will turn on and off heat forcibly
+boolean override = false; //override button, will turn on and off heat forcibly
 byte laststate;
 byte currentstate;
 byte DST;
 byte checkRTC;
 byte rtcChecked;
+boolean pirAcquire;
+byte pirStatus;
+byte pirLastState;
 const byte upArrow = B00101011; //Temp Rising
 const byte downArrow = B00101101; //Temp Falling
 byte packetBuffer[ NTP_PACKET_SIZE]; //Buffer to hold incomming and outgoing packets
@@ -87,6 +90,9 @@ void setup() {
   // make sure that the default chip select pin is set to
   // output, even if you don't use it:
   pinMode(10, OUTPUT);
+  pinMode(13, OUTPUT);
+  pinMode(5, INPUT); //PIR Pin
+  digitalWrite(5, LOW); // Pull down 
   delay(1000);
   Serial.println("Starting Ethernet"); //configure Ethernet
     if(Ethernet.begin(mac) == 0) {
@@ -99,7 +105,26 @@ void setup() {
     IPAddress myIPAddress = Ethernet.localIP();
     Serial.println(myIPAddress);
     Udp.begin(localPort);
-    setRTC();
+      //get the NTP timestamp
+    epoch = getNTP();
+    Serial.println(epoch);
+    //Set the RTC on startup
+    RTC.adjust(epoch);
+    Serial.println("RTC Adjusted");
+  //check to see if the RTC is running, display fault message
+     if( !RTC.isrunning() ) {
+    
+    //display what we did!
+    Serial.println("RTC Fault, check wiring.");
+    
+  } else {
+    //Show unix epoch
+    Serial.print("Unix Epoch: ");
+    Serial.println(epoch);    
+    //show UTC
+    Serial.print("UTC: ");
+    showUTC(epoch);
+  }
   temperatureSPF = 72;
   temperatureDBF = 2;
 lcd.init(); //you know what this does
@@ -128,7 +153,6 @@ void loop() {
   DateTime now = RTC.now();
   DHTRead();
   currentTemp = DegF;
-  Unix = now.unixtime();
   pinMode(A0, OUTPUT);
   if (Winter(override) == true){
    currentstate = TempControl(currentTemp, temperatureSPF, temperatureDBF);
@@ -165,14 +189,34 @@ void loop() {
     
   // check to see if connection has timed out
   if(connectFlag) checkConnectionTimeout();
-  if (now.hour == 0 && now.minute == 0) checkRTC = true;
+  if (now.hour() == 0 && now.minute() == 0) checkRTC = true;
   else {
     checkRTC = false;
     rtcChecked = false;
   }
   if (checkRTC == true && rtcChecked == false){
-   setRTC();
+   epoch = getNTP();
+   RTC.adjust(epoch);
    rtcChecked = true;
+  }
+  pirAcquire = digitalRead(5);
+  if (pirAcquire == HIGH) Serial.println("pir");
+  //Pir toggle inhibit
+  if (pirAcquire != pirLastState){
+    if (pirLastState == HIGH) {
+     //Put logic in here to datalog a heat off state
+      pirStatus = 2;    
+    }
+    if (pirLastState == LOW) {
+     //Put logic in here to datalog a heat on state 
+     pirStatus = 1;
+    }
+    pirLastState = pirAcquire;
+    pirLastTime = epoch;
+  }
+  if (epoch - pirLastTime >= commandTime){
+    if (pirStatus == 2) digitalWrite(13, LOW);
+    if (pirStatus == 1) digitalWrite(13, HIGH);
   }
 }
 
@@ -246,8 +290,11 @@ void sendNTPpacket(IPAddress& address)
 int ESTHour (){
   DateTime now = RTC.now();
   int x;
-  if (DST == true) x = now.hour() - 4;
-  else x = now.hour() - 5;
+  int y;
+  y = now.hour();
+  if (DST == true) x = y - 4; 
+  else x = y - 5;
+  if (x < 0) x = x + 24;
   return x;
 }
 /* This is the heart of the heating system, There is nothing here to handle cooling, at the time of
@@ -298,6 +345,8 @@ byte Winter(byte override){
   byte monthenable = false;
   if (now.month() >= 11 || now.month() <= 5 ) {
     monthenable = true;
+    lcd.setCursor(19, 2);
+    lcd.print ("W");
   } else {
     monthenable = false;
   }
@@ -314,21 +363,10 @@ double Fahrenheit(double celsius) {
         return 1.8 * celsius + 32;
 }
 
-//Celsius to Kelvin conversion
-double Kelvin(double celsius) {
-        return celsius + 273.15;
-}
 
 // delta max = 0.6544 wrt dewPoint()
 // 5x faster than dewPoint()
 // reference: http://en.wikipedia.org/wiki/Dew_point
-double dewPointFast(double celsius, double humidity) {
-        double a = 17.271;
-        double b = 237.7;
-        double temp = (a * celsius) / (b + celsius) + log(humidity/100);
-        double Td = (b * temp) / (a - temp);
-        return Td;
-}
 double dewPointFastF(double celsius, double humidity) {
         double a = 17.271;
         double b = 237.7;
@@ -346,18 +384,9 @@ void DHTRead() {
   temperature = DHT11.temperature;
   //Serial.println(temperature, 2);
   
-  
   //Serial.print("Temperature (oF): ");
   DegF = (Fahrenheit(DHT11.temperature));
   //Serial.println(DegF, 2);
-
-  //Serial.print("Temperature (K): ");
-  kelvin = (Kelvin(DHT11.temperature));
-  //Serial.println(kelvin , 2);
-
-  //Serial.print("Dew Point (oC): ");
-  DewC = (dewPointFast(DHT11.temperature, DHT11.humidity));
-  //Serial.println(DewC , 2);
 
   //Serial.print("Dew Point (oF): ");
   DewF = (dewPointFastF(DHT11.temperature, DHT11.humidity));
@@ -456,7 +485,7 @@ void nwCommand()
  // if we got here, textBuf[0] = 'o'
  {
    if (override == false) override = true;
-   if (override == true) override = false;
+   else if (override == true) override = false;
  }
 void tempCommand()
   // if we got here, textBuff[0] = 't'
@@ -556,18 +585,24 @@ void lcdDisplayActive (float x, int y, float z){
   if (now.day() < 10) lcd.print("0");
   lcd.print(now.day());
   lcd.setCursor(9,0);
-  if (now.hour() < 10) lcd.print("0");
+  if (ESTHour() < 10) lcd.print("0");
   lcd.print(ESTHour());
   lcd.print(":");
   if (now.minute() < 10) lcd.print("0");
   lcd.print(now.minute());
+  lcd.setCursor(18,0);
+  if (pirAcquire == HIGH) lcd.print("*");
+  else lcd.print(" ");
   lcd.setCursor(19,0);
   if (systemStatus == 1) lcd.write(upArrow);
   else lcd.print(".");
   lcd.setCursor(0,1);
-  lcd.print("Actual :");
-  lcd.setCursor(10,1);
+  lcd.print("Actual   :");
+  lcd.setCursor(11,1);
   lcd.print(x); //adds 5 == 15
+  lcd.setCursor(18,1);
+  if (override == true) lcd.print("#");
+  else lcd.print(" ");
   lcd.setCursor(19,1);
   if (systemStatus == 2) lcd.write(downArrow);
   else lcd.print(".");
@@ -577,7 +612,7 @@ void lcdDisplayActive (float x, int y, float z){
   lcd.print(y);
   lcd.setCursor(0,3);
   lcd.print("Humidity :");
-  lcd.setCursor(12,3);
+  lcd.setCursor(11,3);
   lcd.print(z);
  }
 void lcdDisplayInactive(int x){
@@ -708,25 +743,4 @@ void lcdDisplayInactive(int x){
    lcd.write(byte(0));
  }
 }
-void setRTC(){
-  //get the NTP timestamp
-    epoch = getNTP();
-    Serial.println(epoch);
-    //Set the RTC on startup
-    RTC.adjust(epoch);
-    Serial.println("RTC Adjusted");
-  //check to see if the RTC is running, display fault message
-  if( !RTC.isrunning() ) {
-    
-    //display what we did!
-    Serial.println("RTC Fault, check wiring.");
-    
-  } else {
-    //Show unix epoch
-    Serial.print("Unix Epoch: ");
-    Serial.println(epoch);    
-    //show UTC
-    Serial.print("UTC: ");
-    showUTC(epoch);
-  }
-}
+
