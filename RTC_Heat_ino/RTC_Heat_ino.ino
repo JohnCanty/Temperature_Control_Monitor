@@ -209,6 +209,8 @@ byte Winter(byte override){
     lcd.print ("W");
   } else {
     monthenable = false;
+    lcd.setCursor(19, 2);
+    lcd.print ("S");
   }
   if (!override && monthenable == true) return true;
   if (override == true && monthenable == false) return true;
